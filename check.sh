@@ -206,16 +206,20 @@ check_payload_urls() {
     /usr/local/bin /usr/local/lib
   )
 
+  # Resolve the real path of this script so we can exclude it from searches
+  local this_script
+  this_script=$(realpath "${BASH_SOURCE[0]}" 2>/dev/null || readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "")
+
   for url in "${urls[@]}"; do
     local found=0
     for path in "${search_paths[@]}"; do
       if [[ -d "$path" ]]; then
-        if grep -rql "$url" "$path" 2>/dev/null; then
-          while IFS= read -r match; do
-            hit "Payload URL '$url' found in: $match"
-            found=1
-          done < <(grep -rl "$url" "$path" 2>/dev/null)
-        fi
+        while IFS= read -r match; do
+          # Skip hits that point back to this script itself
+          [[ -n "$this_script" && "$match" == "$this_script" ]] && continue
+          hit "Payload URL '$url' found in: $match"
+          found=1
+        done < <(grep -rl "$url" "$path" 2>/dev/null)
       fi
     done
     # Check shell histories
