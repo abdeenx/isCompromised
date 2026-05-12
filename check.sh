@@ -17,6 +17,68 @@ RESET='\033[0m'
 FINDINGS=0
 WARNINGS=0
 
+# Steps to skip (populated by --skip flag)
+SKIP=()
+
+usage() {
+  echo ""
+  echo -e "  ${BOLD}Usage:${RESET} sudo bash $0 [--skip <steps>]"
+  echo ""
+  echo -e "  ${BOLD}--skip <steps>${RESET}   Comma-separated list of step numbers to skip (1-8)"
+  echo ""
+  echo -e "  ${BOLD}Steps:${RESET}"
+  echo -e "    1  Package manifest scan   (@tanstack/setup optionalDependency)"
+  echo -e "    2  router_init.js search   (~2.3 MB payload file)"
+  echo -e "    3  pnpm cache key check    (malicious store hash)"
+  echo -e "    4  Exfiltration domains    (getsession.org, catbox.moe connections)"
+  echo -e "    5  2nd-stage payload URLs  (litter.catbox.moe JS URLs)"
+  echo -e "    6  Suspicious processes    (Node.js outbound connections)"
+  echo -e "    7  Exposed secrets         (npm/GitHub tokens in process env)"
+  echo -e "    8  @tanstack versions      (installed package audit)"
+  echo ""
+  echo -e "  ${BOLD}Examples:${RESET}"
+  echo -e "    sudo bash $0 --skip 3,6"
+  echo -e "    sudo bash $0 --skip 1,2,3"
+  echo ""
+  exit 0
+}
+
+should_skip() {
+  local step="$1"
+  for s in "${SKIP[@]}"; do
+    [[ "$s" == "$step" ]] && return 0
+  done
+  return 1
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --skip)
+        if [[ -z "${2:-}" ]]; then
+          echo -e "${RED}Error: --skip requires a comma-separated list of step numbers${RESET}" >&2
+          usage
+        fi
+        IFS=',' read -ra SKIP <<< "$2"
+        for s in "${SKIP[@]}"; do
+          if ! [[ "$s" =~ ^[1-8]$ ]]; then
+            echo -e "${RED}Error: invalid step '$s' — must be a number between 1 and 8${RESET}" >&2
+            usage
+          fi
+        done
+        shift 2
+        ;;
+      -h|--help)
+        usage
+        ;;
+      *)
+        echo -e "${RED}Error: unknown argument '$1'${RESET}" >&2
+        usage
+        ;;
+    esac
+  done
+}
+
 banner() {
   echo ""
   echo -e "${BOLD}${CYAN}============================================================${RESET}"
@@ -393,7 +455,13 @@ summary() {
 # Entry point
 # =============================================================================
 main() {
+  parse_args "$@"
   banner
+
+  if [[ ${#SKIP[@]} -gt 0 ]]; then
+    echo -e "  ${YELLOW}Skipping steps: ${SKIP[*]}${RESET}"
+    echo ""
+  fi
 
   if [[ $EUID -ne 0 ]]; then
     echo -e "${YELLOW}[WARN] Not running as root — some checks may be incomplete.${RESET}"
@@ -401,20 +469,20 @@ main() {
     echo ""
   fi
 
-  # Require dig for DNS checks
+  # Require dig for DNS checks (steps 4/6 need it)
   if ! command -v dig &>/dev/null; then
     info "Installing 'dig' (dnsutils)..."
     apt-get install -y dnsutils &>/dev/null || yum install -y bind-utils &>/dev/null || true
   fi
 
-  check_package_manifests
-  check_router_init
-  check_pnpm_cache
-  check_exfil_domains
-  check_payload_urls
-  check_suspicious_processes
-  check_env_secrets
-  check_tanstack_versions
+  should_skip 1 && echo -e "\n  ${YELLOW}[SKIP]${RESET} Step 1: Package manifest scan" || check_package_manifests
+  should_skip 2 && echo -e "\n  ${YELLOW}[SKIP]${RESET} Step 2: router_init.js search"   || check_router_init
+  should_skip 3 && echo -e "\n  ${YELLOW}[SKIP]${RESET} Step 3: pnpm cache key check"    || check_pnpm_cache
+  should_skip 4 && echo -e "\n  ${YELLOW}[SKIP]${RESET} Step 4: Exfiltration domains"    || check_exfil_domains
+  should_skip 5 && echo -e "\n  ${YELLOW}[SKIP]${RESET} Step 5: 2nd-stage payload URLs"  || check_payload_urls
+  should_skip 6 && echo -e "\n  ${YELLOW}[SKIP]${RESET} Step 6: Suspicious processes"    || check_suspicious_processes
+  should_skip 7 && echo -e "\n  ${YELLOW}[SKIP]${RESET} Step 7: Exposed secrets"         || check_env_secrets
+  should_skip 8 && echo -e "\n  ${YELLOW}[SKIP]${RESET} Step 8: @tanstack versions"      || check_tanstack_versions
 
   summary
 }
